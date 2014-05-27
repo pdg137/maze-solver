@@ -6,13 +6,16 @@ uint8_t last11, last12, last21, last22;
 uint32_t error1 = 0;
 uint32_t error2 = 0;
 
-#define SPEED 100
+#define SPEED 120
 #define ANGLE_SCALE 20000
 #define STEPS_PER_RADIAN 410
 #define ENCODER_CALIBRATION1 160
 #define RADIUS 10000000L
 #define FOLLOW_MAX_Y 13000000L
 #define FOLLOW_MAX_S 15000L
+#define MAZE_UNIT_DISTANCE 24000000L
+#define STOPPING_DISTANCE 3000000L
+#define STOPPING_TIME_MS 100
 
 #define sign(x) ((x)<0?-1:1)
 #define min(a, b) ((a)<(b)?(a):(b))
@@ -153,11 +156,32 @@ void positionUpdate() {
   if(count2 != last_count2) ticks2(count2 - last_count2);
 }
 
-void goHome() {
+uint8_t goHome() {
   int16_t speed = SPEED;
   int32_t err;
+  static uint8_t started_stopping = 0;
+  static uint16_t started_stopping_time = 0;
   
-  if(x > -20000000)
+  if(x > -STOPPING_DISTANCE)
+  {
+    // work on stopping
+    setMotors(0,0);
+    if(!started_stopping)
+    {
+      started_stopping = 1;
+      started_stopping_time = millis();
+    }
+    
+    if(millis() - started_stopping_time > STOPPING_TIME_MS)
+    {
+      return 1;
+    }
+    return 0;
+  }
+  
+  started_stopping = 0;
+  
+  if(x > -MAZE_UNIT_DISTANCE/3)
     speed = speed/2;
   
   if(c < 0)
@@ -175,12 +199,12 @@ void goHome() {
     setMotors(speed, speed - err);
   else
     setMotors(speed + err, speed);
+    
+  return 0;
 }
 
 // direct-to the origin
 void transform() {
-  x -= RADIUS;
-  
   double r = hypot((double)x, (double)y);
   double nx = (double)x/r;
   double ny = (double)y/r;
@@ -190,8 +214,10 @@ void transform() {
   s = new_s;
   y = 0;
   x = -r;
-  
-  x += RADIUS;
+}
+
+void forward_unit() {
+  x -= MAZE_UNIT_DISTANCE;
 }
 
 uint16_t last_millis = 0;
@@ -202,59 +228,6 @@ void encoderUpdate() {
   {
     positionUpdate();
   }
-}
-
-uint16_t last_on_line_millis = 0;
-uint16_t on_line_start_millis = 0;
-
-uint8_t onLine()
-{
-  return analogRead(1) > 700 || analogRead(0) > 700;
-}
-
-int16_t readLine()
-{  
-  int16_t s1 = max(analogRead(1), 640) - 640;
-  int16_t s0 = max(analogRead(0), 640) - 640;
-  
-  static int16_t last_value = 0;
-  
-  if(s1 > 20 || s0 > 20)
-  {
-    last_on_line_millis = millis();
-    last_value = 1000*(int32_t)(s1 - s0)/(s1+s0); // positive is to the right of the line
-  }
-  else
-  {
-    // lost line
-    last_value = sign(last_value)*1000;
-  }
-  return last_value;
-}
-
-void followLine()
-{
-  static int16_t last_p = 0;
-  int16_t p = readLine();
-  int16_t d = p - last_p;
-  last_p = p;
-  static int32_t i = 0;
-  
-  i += p;
-  i = max(min(p, 1000000), -1000000);
-  
-  int16_t pid = p/15 + d*5 + i/50;
-  pid = max(min(pid, SPEED), -SPEED);
-  if(pid < 0)
-  {
-    setMotors(SPEED, SPEED + pid);
-  }
-  else
-  {
-    setMotors(SPEED - pid, SPEED);
-  }
-  
-  last_p = p;
 }
 
 uint16_t getBatteryVoltage_mv() {
@@ -269,8 +242,6 @@ void debug() {
     
     Serial.print(getBatteryVoltage_mv());
     Serial.write("mV\t");
-    Serial.print(readLine());
-    Serial.write(" ");
     Serial.print(analogRead(0));
     Serial.write(" ");
     Serial.print(analogRead(1));
@@ -312,35 +283,16 @@ void loop() {
     debug();
     break;
   case 1:
-    if(onLine())
-      {
-      state++;
-      on_line_start_millis = millis();
-    }
-    setMotors(100,100);
+    digitalWrite(13, 0);
+    forward_unit();
+    state++;
     break;
   case 2:
-    followLine();
-    if(millis() - on_line_start_millis > 5000)
+    if(goHome())
       state++;
     break;
   case 3:
-    followLine();
-    if(millis() - last_on_line_millis > 500)
-    {
-      transform();
-      state++;
-    }
-    break;
-  case 4:
-    goHome();
-    if(x > -1500000)
-    {
-      state++;
-    }
-    break;
-  case 5:
-    setMotors(0,0);
+    digitalWrite(13, 1);
     debug();
     break;
   }
