@@ -258,7 +258,7 @@ void followLine()
 }
 
 uint16_t getBatteryVoltage_mv() {
-  return analogRead(2) * 10;
+  return analogRead(11) * 10;
 }
 
 void debug() {  
@@ -274,6 +274,14 @@ void debug() {
     Serial.print(analogRead(0));
     Serial.write(" ");
     Serial.print(analogRead(1));
+    Serial.write(" ");
+    Serial.print(analogRead(2));
+    Serial.write(" ");
+    Serial.print(analogRead(3));
+    Serial.write(" ");
+    Serial.print(analogRead(4));
+    Serial.write(" ");
+    Serial.print(analogRead(5));
     Serial.write("\t");
     Serial.print(c);
     Serial.write(",");
