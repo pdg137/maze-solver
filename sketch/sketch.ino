@@ -6,7 +6,6 @@ uint8_t last11, last12, last21, last22;
 uint32_t error1 = 0;
 uint32_t error2 = 0;
 
-#define SPEED 120
 #define ANGLE_SCALE 20000
 #define STEPS_PER_RADIAN 410
 #define ENCODER_CALIBRATION1 160
@@ -14,8 +13,13 @@ uint32_t error2 = 0;
 #define FOLLOW_MAX_Y 13000000L
 #define FOLLOW_MAX_S 15000L
 #define MAZE_UNIT_DISTANCE 24000000L
+
+#define SPEED 120
 #define STOPPING_DISTANCE 3000000L
 #define STOPPING_TIME_MS 100
+
+#define SPIN_SPEED 50
+#define SPIN_STOPPING_SINE 2000
 
 #define sign(x) ((x)<0?-1:1)
 #define min(a, b) ((a)<(b)?(a):(b))
@@ -203,6 +207,35 @@ uint8_t goHome() {
   return 0;
 }
 
+uint8_t spinToFaceOrigin() {
+  int16_t speed = SPIN_SPEED;
+  int32_t err;
+  static uint8_t started_stopping = 0;
+  static uint16_t started_stopping_time = 0;
+  
+  if(s > -SPIN_STOPPING_SINE && s < SPIN_STOPPING_SINE)
+  {
+    // work on stopping
+    setMotors(0,0);
+    if(!started_stopping)
+    {
+      started_stopping = 1;
+      started_stopping_time = millis();
+    }
+    
+    return (millis() - started_stopping_time > STOPPING_TIME_MS);
+  }
+  
+  started_stopping = 0;
+  
+  if(s > 0)
+    setMotors(speed, -speed);
+  else
+    setMotors(-speed, speed);
+    
+  return 0;
+}
+
 // direct-to the origin
 void transform() {
   double r = hypot((double)x, (double)y);
@@ -218,6 +251,16 @@ void transform() {
 
 void forward_unit() {
   x -= MAZE_UNIT_DISTANCE;
+}
+
+void turn_left() {
+  uint16_t tmp_s = -c;
+  c = s;
+  s = tmp_s;
+  
+  uint32_t tmp_y = -x;
+  x = y;
+  y = tmp_y;
 }
 
 uint16_t last_millis = 0;
@@ -289,9 +332,17 @@ void loop() {
     break;
   case 2:
     if(goHome())
-      state++;
+      state ++;
     break;
   case 3:
+    turn_left();
+    state ++;
+    break; 
+  case 4:
+    if(spinToFaceOrigin())
+      state = 1;
+    break;
+  case 5:
     digitalWrite(13, 1);
     debug();
     break;
