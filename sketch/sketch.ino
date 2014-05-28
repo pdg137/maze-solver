@@ -201,6 +201,18 @@ void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
   }
 }
 
+void fixPosition()
+{
+  int16_t pos;
+  uint8_t on_line;
+  readLine(FORWARD, &pos, &on_line);
+  if(on_line)
+  {
+    y = (y + ((int32_t)pos)*1000)/2;
+    s += pos/10;
+  }
+}
+
 uint8_t goHome() {
   int16_t speed = SPEED;
   int32_t err;
@@ -217,7 +229,7 @@ uint8_t goHome() {
       started_stopping_time = millis();
     }
     
-    if(millis() - started_stopping_time > STOPPING_TIME_MS)
+    if(((uint16_t)millis()) - started_stopping_time > STOPPING_TIME_MS)
     {
       return 1;
     }
@@ -264,7 +276,7 @@ uint8_t spinToFaceOrigin() {
       started_stopping_time = millis();
     }
     
-    return (millis() - started_stopping_time > STOPPING_TIME_MS);
+    return (((uint16_t)millis()) - started_stopping_time > STOPPING_TIME_MS);
   }
   
   started_stopping = 0;
@@ -397,7 +409,10 @@ void loop() {
     break; 
   case 4:
     if(spinToFaceOrigin())
+    {
+      fixPosition();
       state = 1;
+    }
     break;
   case 5:
     digitalWrite(13, 1);
