@@ -14,6 +14,11 @@ uint32_t error2 = 0;
 #define FOLLOW_MAX_S 15000L
 #define MAZE_UNIT_DISTANCE 24000000L
 
+#define FORWARD 0
+#define LEFT 1
+#define BACK 2
+#define RIGHT 3
+
 #define SPEED 120
 #define STOPPING_DISTANCE 3000000L
 #define STOPPING_TIME_MS 100
@@ -160,6 +165,42 @@ void positionUpdate() {
   if(count2 != last_count2) ticks2(count2 - last_count2);
 }
 
+void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
+{
+  int16_t s0 = 0; // left sensor
+  int16_t s1 = 0; // right sensor
+  
+  switch(dir)
+  {
+  case FORWARD:
+    s0 = analogRead(1);
+    s1 = analogRead(0);
+    break;
+  case LEFT:
+    s0 = analogRead(5);
+    s1 = analogRead(4);
+    break;
+  case RIGHT:
+    s0 = analogRead(2);
+    s1 = analogRead(3);
+    break;
+  }
+  
+  s1 = max(s1, 640) - 640;
+  s0 = max(s0, 640) - 640;
+  
+  if(s1 > 20 || s0 > 20)
+  {
+    *pos = 1000*(int32_t)(s1 - s0)/(s1+s0); // positive is to the left of the line
+    *on_line = 1;
+  }
+  else
+  {
+    *pos = 0;
+    *on_line = 0;
+  }
+}
+
 uint8_t goHome() {
   int16_t speed = SPEED;
   int32_t err;
@@ -277,25 +318,41 @@ uint16_t getBatteryVoltage_mv() {
   return analogRead(11) * 10;
 }
 
-void debug() {  
-  if(millis() - last_millis > 100)
+void debug() {
+  int16_t pos = 0;
+  uint8_t on_line = 0;
+  if(((uint16_t)millis()) - last_millis > 100)
   {
     led = !led;
     digitalWrite(13, led);
     
     Serial.print(getBatteryVoltage_mv());
     Serial.write("mV\t");
-    Serial.print(analogRead(0));
-    Serial.write(" ");
+    
     Serial.print(analogRead(1));
+    Serial.write(",");
+    Serial.print(analogRead(0));
+    Serial.write(":");
+    readLine(FORWARD,&pos,&on_line);
+    Serial.print(pos);
     Serial.write(" ");
-    Serial.print(analogRead(2));
-    Serial.write(" ");
-    Serial.print(analogRead(3));
-    Serial.write(" ");
-    Serial.print(analogRead(4));
-    Serial.write(" ");
+    
     Serial.print(analogRead(5));
+    Serial.write(",");
+    Serial.print(analogRead(4));
+    Serial.write(":");
+    readLine(LEFT,&pos,&on_line);
+    Serial.print(pos);
+    Serial.write(" ");
+    
+    Serial.print(analogRead(2));
+    Serial.write(",");
+    Serial.print(analogRead(3));
+    Serial.write(":");
+    readLine(RIGHT,&pos,&on_line);
+    Serial.print(pos);
+    Serial.write(" ");
+    
     Serial.write("\t");
     Serial.print(c);
     Serial.write(",");
