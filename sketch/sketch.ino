@@ -205,10 +205,25 @@ void fixPosition()
 {
   int16_t pos;
   uint8_t on_line;
+  
   readLine(FORWARD, &pos, &on_line);
   if(on_line)
   {
     y = (y + ((int32_t)pos)*1000)/2;
+    s += pos/10;
+  }
+  
+  readLine(LEFT, &pos, &on_line);
+  if(on_line)
+  {
+    x -= ((int32_t)pos)*300;
+    s += pos/10;
+  }
+  
+  readLine(RIGHT, &pos, &on_line);
+  if(on_line)
+  {
+    x += ((int32_t)pos)*300;
     s += pos/10;
   }
 }
