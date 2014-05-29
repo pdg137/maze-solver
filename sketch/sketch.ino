@@ -14,7 +14,7 @@ uint8_t started_following = 0;
 #define ENCODER_CALIBRATION1 160
 #define RADIUS 10000000L
 #define FOLLOW_MAX_S 16000L
-#define MAZE_UNIT_DISTANCE 22000000L
+#define MAZE_UNIT_DISTANCE 21500000L
 #define FOLLOW_MAX_Y (MAZE_UNIT_DISTANCE/3)
 #define STOPPING_DISTANCE    800000L
 
@@ -40,10 +40,11 @@ LEFT, FORWARD, RIGHT, LEFT, FORWARD,
 RIGHT, LEFT, RIGHT, LEFT, LEFT,
 FORWARD, FORWARD };
 
-uint8_t path_size = 0;
+uint8_t path_size = 22;
 uint8_t path_pos = 0;
 uint8_t steps_since_last_calibrated = 99;
-  
+uint8_t calibrated_x, calibrated_y;
+
 #define SPEED 120
 #define STOPPING_TIME_MS 100
 
@@ -385,7 +386,14 @@ uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
       y = 0;
       s = 0;
       c = ANGLE_SCALE;
-      steps_since_last_calibrated = 0;
+      
+      calibrated_y = 1;
+      if(calibrated_y && calibrated_x)
+      {
+        steps_since_last_calibrated = 0;
+        calibrated_x = 0;
+        calibrated_y = 0;
+      } 
     }
   }
   
@@ -501,9 +509,14 @@ void forward_unit() {
 void turn(uint8_t dir) {
   int16_t tmp_s;
   int32_t tmp_y;
+  uint8_t tmp_cal;
   
   switch(dir) {
   case LEFT:
+    tmp_cal = calibrated_x;
+    calibrated_x = calibrated_y;
+    calibrated_y = tmp_cal;
+    
     tmp_s = -c;
     c = s;
     s = tmp_s;  
@@ -512,6 +525,10 @@ void turn(uint8_t dir) {
     y = tmp_y;
     break;
   case RIGHT:
+    tmp_cal = calibrated_x;
+    calibrated_x = calibrated_y;
+    calibrated_y = tmp_cal;
+    
     tmp_s = c;
     c = -s;
     s = tmp_s;  
@@ -687,6 +704,10 @@ void loop() {
   encoderUpdate();
   switch(state) {
   case 0:
+    steps_since_last_calibrated = 99;
+    calibrated_x = 0;
+    calibrated_y = 0;
+    
     setMotors(0,0);
     if(!digitalRead(BUTTON_PIN))
     {
@@ -749,7 +770,15 @@ void loop() {
       (path[path_pos] == FORWARD || path[path_pos+1] == FORWARD))
       calibration_cutoff = 5;
       
-    state = (steps_since_last_calibrated < calibration_cutoff ? 7 : 9);
+    if(steps_since_last_calibrated < calibration_cutoff)
+    {
+      state = 7;
+    }
+    else
+    {
+      steps_since_last_calibrated = 99;
+      state = 9;
+    }
     break;
   case 7: // follow path without calibrating
     if(checkForEnd())
