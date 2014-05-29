@@ -40,7 +40,7 @@ LEFT, FORWARD, RIGHT, LEFT, FORWARD,
 RIGHT, LEFT, RIGHT, LEFT, LEFT,
 FORWARD, FORWARD };
 
-uint8_t path_size = 22;
+uint8_t path_size = 0;
 uint8_t path_pos = 0;
 uint8_t steps_since_last_calibrated = 99;
   
@@ -238,6 +238,13 @@ void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
   }
 }
 
+void updateLastPos()
+{ 
+  int16_t p = 0;
+  uint8_t on_line = 0;
+  readLine(FORWARD, &p, &on_line);
+}
+
 void followLine()
 {
   static int16_t last_p = 0;
@@ -354,14 +361,12 @@ uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
   int32_t err;
   static uint8_t started_stopping = 0;
   static uint16_t started_stopping_time = 0;
-  int16_t pos;
-  uint8_t on_line;
   
   // watch for the line in the last inch
   if(x > -MAZE_UNIT_DISTANCE/6)
     watchForLine();
   else
-    readLine(FORWARD, &pos, &on_line);
+    updateLastPos();
   
   // consider following if it is allowed and we are close to the line
   if(allow_following && y > -MAZE_UNIT_DISTANCE/6 && y < MAZE_UNIT_DISTANCE/6 && s > -ANGLE_SCALE/2 && s < ANGLE_SCALE/2)
@@ -439,6 +444,8 @@ uint8_t spinToAngleZero() {
   int32_t err;
   static uint8_t started_stopping = 0;
   static uint16_t started_stopping_time = 0;
+
+  updateLastPos();
   
   // not following
   resetStartedFollowing();
@@ -745,6 +752,8 @@ void loop() {
     state = (steps_since_last_calibrated < calibration_cutoff ? 7 : 9);
     break;
   case 7: // follow path without calibrating
+    if(checkForEnd())
+      state = 0;
     if(goHome(0, 0) || okToLookAhead())
       state ++;
     break;
@@ -760,6 +769,8 @@ void loop() {
     }
     break;
   case 9: // do a slow turn
+    if(checkForEnd())
+      state = 0;
     if(goHome(last_turn_was_fast ? 0 : 1, path_size != path_pos && path[path_pos] != FORWARD) ||
       (path[path_pos] == FORWARD && okToLookAhead()))
       state ++;
