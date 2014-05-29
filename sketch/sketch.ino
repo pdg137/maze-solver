@@ -15,12 +15,19 @@ uint32_t error2 = 0;
 #define MAZE_UNIT_DISTANCE 22000000L
 #define STOPPING_DISTANCE    800000L
 
+#define MAX_PATH 255
+
 #define FORWARD 0
 #define LEFT 1
 #define BACKWARD 2
 #define RIGHT 3
 #define DIR_MAX 3
 
+uint8_t path[MAX_PATH] = {FORWARD, FORWARD, FORWARD, LEFT, FORWARD, LEFT, RIGHT};
+uint8_t path_size = 7;
+uint8_t path_pos = 0;
+uint8_t steps_since_last_calibrated = 0;
+  
 #define SPEED 120
 #define STOPPING_TIME_MS 100
 
@@ -274,30 +281,35 @@ void resetSawLine()
   saw_line_right = 0;
 }
 
-uint8_t goHome() {
+uint8_t goHome(uint8_t allow_following) {
   int16_t speed = SPEED;
   int32_t err;
   static uint8_t started_stopping = 0;
   static uint16_t started_stopping_time = 0;
-  static uint8_t started_dead_reckoning = 0;
+  static uint8_t done_following_line = 0;
   
   // watch for the line in the last inch
   if(x > -MAZE_UNIT_DISTANCE/6)
     watchForLine();
   
   // follow the line for the first two inches
-  if(x < -MAZE_UNIT_DISTANCE*2/6)
+  if(allow_following)
   {
-    followLine();
-    return 0;
-  }
-  else if(!started_dead_reckoning)
-  {
-    // assume we are on the line
-    started_dead_reckoning = 1;
-    y = 0;
-    s = 0;
-    c = ANGLE_SCALE;
+    if(x > -MAZE_UNIT_DISTANCE*5/6 && x < -MAZE_UNIT_DISTANCE*2/6)
+    {
+      followLine();
+      done_following_line = 0;
+      return 0;
+    }
+    else if(!done_following_line)
+    {
+      // assume we are on the line
+      done_following_line = 1;
+      y = 0;
+      s = 0;
+      c = ANGLE_SCALE;
+      steps_since_last_calibrated = 0;
+    }
   }
   
   if(x > -STOPPING_DISTANCE)
@@ -313,7 +325,7 @@ uint8_t goHome() {
     if(((uint16_t)millis()) - started_stopping_time > STOPPING_TIME_MS)
     {
       started_stopping = 0;
-      started_dead_reckoning = 0;
+      done_following_line = 0;
       return 1;
     }
     return 0;
@@ -380,24 +392,6 @@ uint8_t spinToAngleZero() {
   return 0;
 }
 
-uint8_t turnWatching() {
-  uint16_t elapsed_time = millis() - state_start_millis;
-
-  watchForLine();
-  
-  if(elapsed_time < 200)
-  {
-    setMotors(SPIN_SPEED,-SPIN_SPEED);
-    return 0;
-  }
-  else if(elapsed_time < 600)
-  {
-    setMotors(-SPIN_SPEED,SPIN_SPEED);
-    return 0;
-  }
-  else return spinToAngleZero();
-}
-
 // direct-to the origin
 void transform() {
   double r = hypot((double)x, (double)y);
@@ -447,31 +441,40 @@ void turn(uint8_t dir) {
   }
 }
 
+void addToPath(uint8_t dir) {
+  path[path_size] = dir;
+  path_size += 1;
+}
+
 void turnLeftmost() {
   watchForLine();
   
   if(saw_line_left)
   {
+    addToPath(LEFT);
     turn(LEFT);
     return;
   }
   
   if(saw_line_forward)
   {
+    addToPath(FORWARD);
     return;
   }
   
   if(saw_line_right)
   {
+    addToPath(RIGHT);
     turn(RIGHT);
     return;
   }
   
+  addToPath(BACKWARD);
   turn(BACKWARD);
   return;
 }
 
-uint16_t last_millis = 0;
+uint32_t last_millis = 0;
 uint8_t led = 0;
 
 void encoderUpdate() {
@@ -488,7 +491,7 @@ uint16_t getBatteryVoltage_mv() {
 void debug() {
   int16_t pos = 0;
   uint8_t on_line = 0;
-  if(((uint16_t)millis()) - last_millis > 100)
+  if(millis() - last_millis > 100)
   {
     led = !led;
     digitalWrite(13, led);
@@ -537,13 +540,14 @@ void debug() {
     Serial.print(error2);
     
     Serial.println("");
-    last_millis += 100;
+    last_millis = millis();
   }
 }
 
 void loop() {
   static uint16_t battery_voltage_low_millis = 0;
   static uint8_t last_state = 255;
+  static uint8_t last_turn_was_fast = 0;
   
   if(last_state != state)
   {
@@ -558,17 +562,16 @@ void loop() {
     if(getBatteryVoltage_mv() < 3000)
       battery_voltage_low_millis = millis();
     if(millis() - battery_voltage_low_millis > 1000)
-      state++;
+      state = 6;
     debug();
     break;
   case 1:
     digitalWrite(13, 0);
     forward_unit();
-    resetSawLine();
     state++;
     break;
   case 2:
-    if(goHome())   
+    if(goHome(1))   
       state ++;
     break;
   case 3:
@@ -583,5 +586,55 @@ void loop() {
     digitalWrite(13, 1);
     debug();
     break;
+  case 6:
+    digitalWrite(13, 0);
+    forward_unit();
+    steps_since_last_calibrated ++;
+    state = (steps_since_last_calibrated < 2 ? 7 : 9);
+    break;
+  case 7: // follow path without calibrating
+    if(goHome(0) || x > -MAZE_UNIT_DISTANCE)
+      state ++;
+    break;
+  case 8:
+    if(path_size == path_pos)
+      state = 12;
+    else
+    {
+      turn(path[path_pos]);
+      last_turn_was_fast = (path[path_pos] != FORWARD);
+      state = 6;
+      path_pos ++;
+    }
+    break;
+  case 9: // do a slow turn
+    if(goHome(last_turn_was_fast ? 0 : 1))
+      state ++;
+    break;
+  case 10:  
+    if(path_size == path_pos)
+    {
+      state = 12;
+      break;
+    }
+    turn(path[path_pos]);
+    state ++;
+    path_pos ++;
+    break;
+  case 11:
+    if(spinToAngleZero())
+    {
+      last_turn_was_fast = 0;
+      state = 6;
+    }
+    break;
+  case 12:
+    if(goHome(0))
+      state ++;
+    break;
+  case 13:
+    digitalWrite(13, 1);
+    setMotors(0,0);
+    break;  
   }
 }
