@@ -569,12 +569,13 @@ void loop() {
     if(getBatteryVoltage_mv() < 3000)
       battery_voltage_low_millis = millis();
     if(millis() - battery_voltage_low_millis > 1000)
-      state = 6;
+      state = 1;
     debug();
     break;
   case 1:
     digitalWrite(13, 0);
     forward_unit();
+    resetSawLine();
     state++;
     break;
   case 2:
