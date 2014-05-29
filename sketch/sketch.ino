@@ -529,9 +529,35 @@ void turn(uint8_t dir) {
 }
 
 void simplifyPath() {
-  // TODO
+  if(path_size >= 3 && path[path_size-2] == BACKWARD && path[path_size-3] != BACKWARD && path[path_size-1] != BACKWARD)
+  {
+    // if the second-to-last move was B, we can always simplify
+    // e.g. RBS -> L
+    // the general algorithm is to count L as -1 and R as +1 as follows:
+    int8_t count = 0;
+    count -= (path[path_size-3] == LEFT);
+    count += (path[path_size-3] == RIGHT);
+    count -= (path[path_size-1] == LEFT);
+    count += (path[path_size-1] == RIGHT);
+    
+    path_size -= 2;
+    switch(count) {
+    case 2:
+    case -2:
+      path[path_size-1] = FORWARD;
+      break;
+    case -1:
+      path[path_size-1] = RIGHT;
+      break;
+    case 0:
+      path[path_size-1] = BACKWARD;
+      break;
+    case 1:
+      path[path_size-1] = LEFT;
+      break;
+    }
+  }
 }
-
 void addToPath(uint8_t dir) {
   path[path_size] = dir;
   path_size += 1;
@@ -758,11 +784,7 @@ void loop() {
     break;
   case 12:
     if(goHome(0, 0))
-      state ++;
+      state = 0;
     break;
-  case 13:
-    digitalWrite(13, 1);
-    setMotors(0,0);
-    break;  
   }
 }
