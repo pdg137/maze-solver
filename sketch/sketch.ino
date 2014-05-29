@@ -217,7 +217,7 @@ void fixPosition()
   
   if(on_line_forward)
   {
-    y = (y + ((int32_t)pos_forward)*1000)/2;
+    y = (2*y + ((int32_t)pos_forward)*1000)/3;
     s_estimate_sum += pos_forward * 3L;
     s_estimate_count += 1;
   }
@@ -238,8 +238,8 @@ void fixPosition()
     s_estimate_count += 1;
   }
   
-  x = (x + x_estimate_sum) / (1 + x_estimate_count);
-  s = (s + s_estimate_sum) / (1 + s_estimate_count);
+  x = (2*x + x_estimate_sum) / (2 + x_estimate_count);
+  s = (2*s + s_estimate_sum) / (2 + s_estimate_count);
 }
 
 uint8_t saw_line_forward = 0;
@@ -557,8 +557,11 @@ void loop() {
       watchForLine();
       if(saw_line_forward)
         state += 2; // skip the wiggle
-      else      
+      else
+      {
+        fixPosition();      
         state ++;
+      }
     }
     break;
   case 3:
