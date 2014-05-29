@@ -13,9 +13,9 @@ uint8_t started_following = 0;
 #define STEPS_PER_RADIAN 410
 #define ENCODER_CALIBRATION1 160
 #define RADIUS 10000000L
-#define FOLLOW_MAX_Y 13000000L
-#define FOLLOW_MAX_S 15000L
+#define FOLLOW_MAX_S 16000L
 #define MAZE_UNIT_DISTANCE 22000000L
+#define FOLLOW_MAX_Y (MAZE_UNIT_DISTANCE/3)
 #define STOPPING_DISTANCE    800000L
 
 #define MAX_PATH 255
@@ -33,19 +33,14 @@ uint8_t started_following = 0;
 
 //uint8_t path[MAX_PATH] = { FORWARD, FORWARD, FORWARD, FORWARD, RIGHT };
 
-uint8_t path[MAX_PATH];
+uint8_t path[MAX_PATH] = {
+FORWARD, FORWARD, FORWARD, FORWARD, FORWARD,
+LEFT, LEFT, RIGHT, RIGHT, LEFT,
+LEFT, FORWARD, RIGHT, LEFT, FORWARD,
+RIGHT, LEFT, RIGHT, LEFT, LEFT,
+FORWARD, FORWARD };
 
-/*= {
-  LEFT, LEFT, RIGHT, FORWARD, FORWARD,
-  FORWARD, FORWARD, RIGHT, FORWARD, RIGHT,
-  FORWARD, RIGHT, LEFT, FORWARD, LEFT,
-  FORWARD, FORWARD, FORWARD, FORWARD, LEFT,
-  FORWARD, FORWARD, FORWARD, LEFT, FORWARD,
-  FORWARD, LEFT, FORWARD, FORWARD, LEFT,
-  LEFT, FORWARD, RIGHT, RIGHT
-};*/
-
-uint8_t path_size = 0; //34;
+uint8_t path_size = 22;
 uint8_t path_pos = 0;
 uint8_t steps_since_last_calibrated = 99;
   
@@ -225,7 +220,7 @@ void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
   s1 = max(s1, 640) - 640;
   s0 = max(s0, 640) - 640;
   
-  if(s1 > 100 || s0 > 100)
+  if(s1 > 20 || s0 > 20)
   {
     *pos = 1000*(int32_t)(s1 - s0)/(s1+s0); // positive is to the left of the line
     last_pos[dir] = *pos;
@@ -423,7 +418,7 @@ uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
   if(c < 0)
   {
     // pointed backwards
-    err = (s > 0 ? speed/2 : -speed/2);
+    err = (s > 0 ? speed : -speed);
   }
   else
   {    
@@ -663,14 +658,18 @@ void debug() {
 }
 
 uint8_t okToLookAhead() {
-  return x > -MAZE_UNIT_DISTANCE*5/6 && y > -MAZE_UNIT_DISTANCE/2 && y < MAZE_UNIT_DISTANCE/2;
+  return x > -MAZE_UNIT_DISTANCE*3/6 && y > -MAZE_UNIT_DISTANCE*4/6 && y < MAZE_UNIT_DISTANCE*4/6 ||
+    x > -MAZE_UNIT_DISTANCE*4/6 && y > -MAZE_UNIT_DISTANCE*3/6 && y < MAZE_UNIT_DISTANCE*3/6 ||
+    x > -MAZE_UNIT_DISTANCE*5/6 && y > -MAZE_UNIT_DISTANCE*2/6 && y < MAZE_UNIT_DISTANCE*2/6 ||
+    x > -MAZE_UNIT_DISTANCE && y > -MAZE_UNIT_DISTANCE/6 && y < MAZE_UNIT_DISTANCE/6;
 }
 
 void loop() {
   static uint16_t battery_voltage_low_millis = 0;
   static uint8_t last_state = 255;
   static uint8_t last_turn_was_fast = 0;
-  
+  uint8_t calibration_cutoff;
+    
   if(last_state != state)
   {
     // in a new state!
@@ -684,6 +683,7 @@ void loop() {
     setMotors(0,0);
     if(!digitalRead(BUTTON_PIN))
     {
+      delay(1000);
       if(path_size)
       {
         state = 6;
@@ -726,16 +726,23 @@ void loop() {
     forward_unit();
     steps_since_last_calibrated ++;
     
+    calibration_cutoff = 10;
+    
     // if the next two turns are FORWARD, try calibration, since it will not slow us down
     if(path_pos+1 < path_size && path[path_pos] == FORWARD && path[path_pos+1] == FORWARD)
-      steps_since_last_calibrated = 50;
+      calibration_cutoff = 0;
 
     // if we have a BACKWARD approaching (which shouldn't happen), also calibrate
-    if(path_pos+1 < path_size && path[path_pos+1] == BACKWARD ||
+    else if(path_pos+1 < path_size && path[path_pos+1] == BACKWARD ||
       path_pos < path_size && path[path_pos] == BACKWARD)
-      steps_since_last_calibrated = 50;
+      calibration_cutoff = 0;
     
-    state = (steps_since_last_calibrated < 20 ? 7 : 9);
+    // if we have a forward coming up, make calibration more likely
+    else if(path_pos < path_size+1 &&
+      (path[path_pos] == FORWARD || path[path_pos+1] == FORWARD))
+      calibration_cutoff = 5;
+      
+    state = (steps_since_last_calibrated < calibration_cutoff ? 7 : 9);
     break;
   case 7: // follow path without calibrating
     if(goHome(0, 0) || okToLookAhead())
