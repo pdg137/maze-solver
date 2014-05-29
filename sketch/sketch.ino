@@ -19,6 +19,7 @@ uint32_t error2 = 0;
 #define LEFT 1
 #define BACKWARD 2
 #define RIGHT 3
+#define DIR_MAX 3
 
 #define SPEED 120
 #define STOPPING_TIME_MS 100
@@ -166,6 +167,8 @@ void positionUpdate() {
   if(count2 != last_count2) ticks2(count2 - last_count2);
 }
 
+int16_t last_pos[DIR_MAX+1];
+
 void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
 {
   int16_t s0 = 0; // left sensor
@@ -190,56 +193,50 @@ void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
   s1 = max(s1, 640) - 640;
   s0 = max(s0, 640) - 640;
   
-  if(s1 > 20 || s0 > 20)
+  if(s1 > 100 || s0 > 100)
   {
     *pos = 1000*(int32_t)(s1 - s0)/(s1+s0); // positive is to the left of the line
+    last_pos[dir] = *pos;
     *on_line = 1;
   }
   else
   {
-    *pos = 0;
+    if(last_pos[dir] > 0)
+      *pos = 1000;
+    else if(last_pos[dir] < 0)
+      *pos = -1000;
+    else
+      *pos = 0;
     *on_line = 0;
   }
 }
 
-void fixPosition()
+void followLine()
 {
-  int16_t pos_forward, pos_left, pos_right;
-  uint8_t on_line_forward, on_line_left, on_line_right;
-  int32_t s_estimate_sum = 0;
-  uint8_t s_estimate_count = 0;
-  int32_t x_estimate_sum = 0;
-  uint8_t x_estimate_count = 0;
+  static int16_t last_p = 0;
+  int16_t p = 0;
+  uint8_t on_line = 0;
+  readLine(FORWARD, &p, &on_line);
   
-  readLine(FORWARD, &pos_forward, &on_line_forward);
-  readLine(LEFT, &pos_left, &on_line_left);
-  readLine(RIGHT, &pos_right, &on_line_right);
+  int16_t d = p - last_p;
+  last_p = p;
+  static int32_t i = 0;
   
-  if(on_line_forward)
+  i += p;
+  i = max(min(p, 1000000), -1000000);
+  
+  int16_t pid = p/15 + d*5;
+  pid = max(min(pid, SPEED), -SPEED);
+  if(pid < 0)
   {
-    y = (2*y + ((int32_t)pos_forward)*1000)/3;
-    s_estimate_sum += pos_forward * 3L;
-    s_estimate_count += 1;
+    setMotors(SPEED + pid, SPEED);
+  }
+  else
+  {
+    setMotors(SPEED, SPEED - pid);
   }
   
-  if(on_line_left)
-  {
-    x_estimate_sum = - pos_left * 1000L;
-    x_estimate_count += 1;
-    s_estimate_sum += pos_left * 3L;
-    s_estimate_count += 1;
-  }
-  
-  if(on_line_right)
-  {
-    x_estimate_sum = pos_right * 1000L;
-    x_estimate_count += 1;
-    s_estimate_sum += pos_right * 3L;
-    s_estimate_count += 1;
-  }
-  
-  x = (2*x + x_estimate_sum) / (2 + x_estimate_count);
-  s = (2*s + s_estimate_sum) / (2 + s_estimate_count);
+  last_p = p;
 }
 
 uint8_t saw_line_forward = 0;
@@ -282,10 +279,26 @@ uint8_t goHome() {
   int32_t err;
   static uint8_t started_stopping = 0;
   static uint16_t started_stopping_time = 0;
+  static uint8_t started_dead_reckoning = 0;
   
   // watch for the line in the last inch
   if(x > -MAZE_UNIT_DISTANCE/6)
     watchForLine();
+  
+  // follow the line for the first two inches
+  if(x < -MAZE_UNIT_DISTANCE*2/6)
+  {
+    followLine();
+    return 0;
+  }
+  else if(!started_dead_reckoning)
+  {
+    // assume we are on the line
+    started_dead_reckoning = 1;
+    y = 0;
+    s = 0;
+    c = ANGLE_SCALE;
+  }
   
   if(x > -STOPPING_DISTANCE)
   {
@@ -300,6 +313,7 @@ uint8_t goHome() {
     if(((uint16_t)millis()) - started_stopping_time > STOPPING_TIME_MS)
     {
       started_stopping = 0;
+      started_dead_reckoning = 0;
       return 1;
     }
     return 0;
@@ -485,8 +499,11 @@ void debug() {
     Serial.print(analogRead(1));
     Serial.write(",");
     Serial.print(analogRead(0));
-    Serial.write(":");
     readLine(FORWARD,&pos,&on_line);
+    if(on_line)   
+      Serial.write(":");
+    else
+      Serial.write("!");
     Serial.print(pos);
     Serial.write(" ");
     
@@ -551,35 +568,18 @@ void loop() {
     state++;
     break;
   case 2:
-    if(goHome())
-    {
-      saw_line_forward = 0;
-      watchForLine();
-      if(saw_line_forward)
-        state += 2; // skip the wiggle
-      else
-      {
-        fixPosition();      
-        state ++;
-      }
-    }
-    break;
-  case 3:
-    if(turnWatching())
+    if(goHome())   
       state ++;
     break;
-  case 4:
+  case 3:
     turnLeftmost();
     state ++;
     break; 
-  case 5:
+  case 4:
     if(spinToAngleZero())
-    {
-      fixPosition();
       state = 1;
-    }
     break;
-  case 6:
+  case 5:
     digitalWrite(13, 1);
     debug();
     break;
