@@ -281,7 +281,7 @@ void resetSawLine()
   saw_line_right = 0;
 }
 
-uint8_t goHome(uint8_t allow_following) {
+uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
   int16_t speed = SPEED;
   int32_t err;
   static uint8_t started_stopping = 0;
@@ -312,7 +312,7 @@ uint8_t goHome(uint8_t allow_following) {
     }
   }
   
-  if(x > -STOPPING_DISTANCE)
+  if(x > -STOPPING_DISTANCE && stop_at_end)
   {
     // work on stopping
     setMotors(0,0);
@@ -330,10 +330,16 @@ uint8_t goHome(uint8_t allow_following) {
     }
     return 0;
   }
+  else if(x >= 0 && !stop_at_end)
+  {
+    started_stopping = 0;
+    done_following_line = 0;
+    return 1;
+  }
   
   started_stopping = 0;
   
-  if(x > -MAZE_UNIT_DISTANCE/3)
+  if(stop_at_end && x > -MAZE_UNIT_DISTANCE/3)
     speed = speed/2;
   
   if(c < 0)
@@ -571,7 +577,7 @@ void loop() {
     state++;
     break;
   case 2:
-    if(goHome(1))   
+    if(goHome(1, 1))   
       state ++;
     break;
   case 3:
@@ -593,7 +599,7 @@ void loop() {
     state = (steps_since_last_calibrated < 2 ? 7 : 9);
     break;
   case 7: // follow path without calibrating
-    if(goHome(0) || x > -MAZE_UNIT_DISTANCE)
+    if(goHome(0, 0) || x > -MAZE_UNIT_DISTANCE)
       state ++;
     break;
   case 8:
@@ -608,7 +614,7 @@ void loop() {
     }
     break;
   case 9: // do a slow turn
-    if(goHome(last_turn_was_fast ? 0 : 1))
+    if(goHome(last_turn_was_fast ? 0 : 1, path_size != path_pos && path[path_pos] != FORWARD))
       state ++;
     break;
   case 10:  
@@ -618,7 +624,15 @@ void loop() {
       break;
     }
     turn(path[path_pos]);
-    state ++;
+    if(path[path_pos] == FORWARD)
+    {
+        state = 6;
+        last_turn_was_fast = 0;
+    }
+    else
+    {
+      state ++;
+    }
     path_pos ++;
     break;
   case 11:
@@ -629,7 +643,7 @@ void loop() {
     }
     break;
   case 12:
-    if(goHome(0))
+    if(goHome(0, 0))
       state ++;
     break;
   case 13:
