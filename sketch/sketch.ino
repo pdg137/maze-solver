@@ -6,6 +6,9 @@ uint8_t last11, last12, last21, last22;
 uint32_t error1 = 0;
 uint32_t error2 = 0;
 
+uint16_t started_following_time = 0;
+uint8_t started_following = 0;
+
 #define ANGLE_SCALE 20000
 #define STEPS_PER_RADIAN 410
 #define ENCODER_CALIBRATION1 160
@@ -23,8 +26,19 @@ uint32_t error2 = 0;
 #define RIGHT 3
 #define DIR_MAX 3
 
-uint8_t path[MAX_PATH] = {FORWARD, FORWARD, FORWARD, LEFT, FORWARD, LEFT, FORWARD, FORWARD, RIGHT};
-uint8_t path_size = 9;
+//uint8_t path[MAX_PATH] = { FORWARD, FORWARD, FORWARD, FORWARD, RIGHT };
+
+uint8_t path[MAX_PATH] = {
+  LEFT, LEFT, RIGHT, FORWARD, FORWARD,
+  FORWARD, FORWARD, RIGHT, FORWARD, RIGHT,
+  FORWARD, RIGHT, LEFT, FORWARD, LEFT,
+  FORWARD, FORWARD, FORWARD, FORWARD, LEFT,
+  FORWARD, FORWARD, FORWARD, LEFT, FORWARD,
+  FORWARD, LEFT, FORWARD, FORWARD, LEFT,
+  LEFT, FORWARD, RIGHT, RIGHT
+};
+
+uint8_t path_size = 34;
 uint8_t path_pos = 0;
 uint8_t steps_since_last_calibrated = 99;
   
@@ -232,7 +246,7 @@ void followLine()
   i += p;
   i = max(min(p, 1000000), -1000000);
   
-  int16_t pid = p/15 + d*5;
+  int16_t pid = p/7 + d*10;
   pid = max(min(pid, SPEED), -SPEED);
   if(pid < 0)
   {
@@ -244,6 +258,20 @@ void followLine()
   }
   
   last_p = p;
+  
+  if(on_line)
+  {
+    if(!started_following)
+    {
+      started_following = 1;
+      started_following_time = millis();
+    }
+    digitalWrite(13, 1);
+  }
+  else
+  {
+    resetStartedFollowing();
+  }
 }
 
 uint8_t saw_line_forward = 0;
@@ -281,37 +309,48 @@ void resetSawLine()
   saw_line_right = 0;
 }
 
+void resetStartedFollowing()
+{
+  started_following = 0;
+  digitalWrite(13, 0);
+}
+
 uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
   int16_t speed = SPEED;
   int32_t err;
   static uint8_t started_stopping = 0;
   static uint16_t started_stopping_time = 0;
-  static uint8_t done_following_line = 0;
+  int16_t pos;
+  uint8_t on_line;
   
   // watch for the line in the last inch
   if(x > -MAZE_UNIT_DISTANCE/6)
     watchForLine();
+  else
+    readLine(FORWARD, &pos, &on_line);
   
   // consider following if it is allowed and we are close to the line
-  if(allow_following && x > -MAZE_UNIT_DISTANCE*7/6 && y > -MAZE_UNIT_DISTANCE/6 && y < MAZE_UNIT_DISTANCE/6 && s > -ANGLE_SCALE/2 && s < ANGLE_SCALE/2)
+  if(allow_following && y > -MAZE_UNIT_DISTANCE/6 && y < MAZE_UNIT_DISTANCE/6 && s > -ANGLE_SCALE/2 && s < ANGLE_SCALE/2)
   {
-    // follow the line for the first two inches
-    if(x < -MAZE_UNIT_DISTANCE*4/6)
+    // follow the line for the moddle four inches
+    if( (x > -MAZE_UNIT_DISTANCE*8/6 && x < -MAZE_UNIT_DISTANCE*4/6) ||
+      (x > -MAZE_UNIT_DISTANCE*14/6 && x < -MAZE_UNIT_DISTANCE*10/6) ) // if it is looking ahead to the next segment
     {
       followLine();
-      done_following_line = 0;
       return 0;
     }
-    else if(!done_following_line)
+    else if(started_following && ((uint16_t)millis() - started_following_time > 200))
     {
       // assume we are on the line
-      done_following_line = 1;
       y = 0;
       s = 0;
       c = ANGLE_SCALE;
       steps_since_last_calibrated = 0;
     }
   }
+  
+  // not following
+  resetStartedFollowing();
   
   if(x > -STOPPING_DISTANCE && stop_at_end)
   {
@@ -326,7 +365,6 @@ uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
     if(((uint16_t)millis()) - started_stopping_time > STOPPING_TIME_MS)
     {
       started_stopping = 0;
-      done_following_line = 0;
       return 1;
     }
     return 0;
@@ -334,7 +372,6 @@ uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
   else if(x >= 0 && !stop_at_end)
   {
     started_stopping = 0;
-    done_following_line = 0;
     return 1;
   }
   
@@ -367,6 +404,9 @@ uint8_t spinToAngleZero() {
   int32_t err;
   static uint8_t started_stopping = 0;
   static uint16_t started_stopping_time = 0;
+  
+  // not following
+  resetStartedFollowing();
   
   if(c > 0 && s > -SPIN_STOPPING_SINE && s < SPIN_STOPPING_SINE)
   {
@@ -551,6 +591,10 @@ void debug() {
   }
 }
 
+uint8_t okToLookAhead() {
+  return x > -MAZE_UNIT_DISTANCE*5/6 && y > -MAZE_UNIT_DISTANCE/2 && y < MAZE_UNIT_DISTANCE/2;
+}
+
 void loop() {
   static uint16_t battery_voltage_low_millis = 0;
   static uint8_t last_state = 255;
@@ -569,7 +613,7 @@ void loop() {
     if(getBatteryVoltage_mv() < 3000)
       battery_voltage_low_millis = millis();
     if(millis() - battery_voltage_low_millis > 1000)
-      state = 1;
+      state = 6;
     debug();
     break;
   case 1:
@@ -598,10 +642,15 @@ void loop() {
     digitalWrite(13, 0);
     forward_unit();
     steps_since_last_calibrated ++;
-    state = (steps_since_last_calibrated < 2 ? 7 : 9);
+    
+    // if the next two turns are FORWARD, try calibration, since it will not slow us down
+    if(path_pos+1 < path_size && path[path_pos] == FORWARD && path[path_pos+1] == FORWARD)
+      steps_since_last_calibrated = 50;
+    
+    state = (steps_since_last_calibrated < 20 ? 7 : 9);
     break;
   case 7: // follow path without calibrating
-    if(goHome(0, 0) || x > -MAZE_UNIT_DISTANCE*5/6)
+    if(goHome(0, 0) || okToLookAhead())
       state ++;
     break;
   case 8:
@@ -616,7 +665,8 @@ void loop() {
     }
     break;
   case 9: // do a slow turn
-    if(goHome(last_turn_was_fast ? 0 : 1, path_size != path_pos && path[path_pos] != FORWARD))
+    if(goHome(last_turn_was_fast ? 0 : 1, path_size != path_pos && path[path_pos] != FORWARD) ||
+      (path[path_pos] == FORWARD && okToLookAhead()))
       state ++;
     break;
   case 10:  
