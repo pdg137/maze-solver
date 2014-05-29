@@ -12,7 +12,7 @@ uint32_t error2 = 0;
 #define RADIUS 10000000L
 #define FOLLOW_MAX_Y 13000000L
 #define FOLLOW_MAX_S 15000L
-#define MAZE_UNIT_DISTANCE 21315645L
+#define MAZE_UNIT_DISTANCE 22000000L
 #define STOPPING_DISTANCE    800000L
 
 #define FORWARD 0
@@ -204,29 +204,42 @@ void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
 
 void fixPosition()
 {
-  int16_t pos;
-  uint8_t on_line;
+  int16_t pos_forward, pos_left, pos_right;
+  uint8_t on_line_forward, on_line_left, on_line_right;
+  int32_t s_estimate_sum = 0;
+  uint8_t s_estimate_count = 0;
+  int32_t x_estimate_sum = 0;
+  uint8_t x_estimate_count = 0;
   
-  readLine(FORWARD, &pos, &on_line);
-  if(on_line)
+  readLine(FORWARD, &pos_forward, &on_line_forward);
+  readLine(LEFT, &pos_left, &on_line_left);
+  readLine(RIGHT, &pos_right, &on_line_right);
+  
+  if(on_line_forward)
   {
-    y = (y + ((int32_t)pos)*1000)/2;
-    s += pos/10;
+    y = (y + ((int32_t)pos_forward)*1000)/2;
+    s_estimate_sum += pos_forward * 3L;
+    s_estimate_count += 1;
   }
   
-  readLine(LEFT, &pos, &on_line);
-  if(on_line)
+  if(on_line_left)
   {
-    x -= ((int32_t)pos)*300;
-    s += pos/10;
+    x_estimate_sum = - pos_left * 1000L;
+    x_estimate_count += 1;
+    s_estimate_sum += pos_left * 3L;
+    s_estimate_count += 1;
   }
   
-  readLine(RIGHT, &pos, &on_line);
-  if(on_line)
+  if(on_line_right)
   {
-    x += ((int32_t)pos)*300;
-    s += pos/10;
+    x_estimate_sum = pos_right * 1000L;
+    x_estimate_count += 1;
+    s_estimate_sum += pos_right * 3L;
+    s_estimate_count += 1;
   }
+  
+  x = (x + x_estimate_sum) / (1 + x_estimate_count);
+  s = (s + s_estimate_sum) / (1 + s_estimate_count);
 }
 
 uint8_t saw_line_forward = 0;
@@ -539,7 +552,14 @@ void loop() {
     break;
   case 2:
     if(goHome())
-      state ++;
+    {
+      saw_line_forward = 0;
+      watchForLine();
+      if(saw_line_forward)
+        state += 2; // skip the wiggle
+      else      
+        state ++;
+    }
     break;
   case 3:
     if(turnWatching())
