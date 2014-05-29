@@ -12,19 +12,19 @@ uint32_t error2 = 0;
 #define RADIUS 10000000L
 #define FOLLOW_MAX_Y 13000000L
 #define FOLLOW_MAX_S 15000L
-#define MAZE_UNIT_DISTANCE 24000000L
+#define MAZE_UNIT_DISTANCE 21315645L
+#define STOPPING_DISTANCE    800000L
 
 #define FORWARD 0
 #define LEFT 1
-#define BACK 2
+#define BACKWARD 2
 #define RIGHT 3
 
 #define SPEED 120
-#define STOPPING_DISTANCE 3000000L
 #define STOPPING_TIME_MS 100
 
 #define SPIN_SPEED 50
-#define SPIN_STOPPING_SINE 2000
+#define SPIN_STOPPING_SINE 500
 
 #define sign(x) ((x)<0?-1:1)
 #define min(a, b) ((a)<(b)?(a):(b))
@@ -35,6 +35,7 @@ int16_t c=ANGLE_SCALE;
 int16_t s=0;
 int32_t x=0, y=0;
 uint8_t state = 0;
+uint32_t state_start_millis = 0;
 
 // Encoder 1 uses INT0 and INT1
 ISR(INT1_vect,ISR_ALIASOF(INT0_vect));
@@ -228,11 +229,50 @@ void fixPosition()
   }
 }
 
+uint8_t saw_line_forward = 0;
+uint8_t saw_line_left = 0;
+uint8_t saw_line_right = 0;
+
+void watchForLine()
+{
+  int16_t pos;
+  uint8_t on_line;
+  
+  readLine(FORWARD, &pos, &on_line);
+  if(on_line)
+  {
+    saw_line_forward = 1;
+  }
+  
+  readLine(LEFT, &pos, &on_line);
+  if(on_line)
+  {
+    saw_line_left = 1;
+  }
+  
+  readLine(RIGHT, &pos, &on_line);
+  if(on_line)
+  {
+    saw_line_right = 1;
+  }  
+}
+
+void resetSawLine()
+{
+  saw_line_left = 0;
+  saw_line_forward = 0;
+  saw_line_right = 0;
+}
+
 uint8_t goHome() {
   int16_t speed = SPEED;
   int32_t err;
   static uint8_t started_stopping = 0;
   static uint16_t started_stopping_time = 0;
+  
+  // watch for the line in the last inch
+  if(x > -MAZE_UNIT_DISTANCE/6)
+    watchForLine();
   
   if(x > -STOPPING_DISTANCE)
   {
@@ -246,6 +286,7 @@ uint8_t goHome() {
     
     if(((uint16_t)millis()) - started_stopping_time > STOPPING_TIME_MS)
     {
+      started_stopping = 0;
       return 1;
     }
     return 0;
@@ -275,13 +316,13 @@ uint8_t goHome() {
   return 0;
 }
 
-uint8_t spinToFaceOrigin() {
+uint8_t spinToAngleZero() {
   int16_t speed = SPIN_SPEED;
   int32_t err;
   static uint8_t started_stopping = 0;
   static uint16_t started_stopping_time = 0;
   
-  if(s > -SPIN_STOPPING_SINE && s < SPIN_STOPPING_SINE)
+  if(c > 0 && s > -SPIN_STOPPING_SINE && s < SPIN_STOPPING_SINE)
   {
     // work on stopping
     setMotors(0,0);
@@ -291,7 +332,15 @@ uint8_t spinToFaceOrigin() {
       started_stopping_time = millis();
     }
     
-    return (((uint16_t)millis()) - started_stopping_time > STOPPING_TIME_MS);
+    if(((uint16_t)millis()) - started_stopping_time > STOPPING_TIME_MS)
+    {    
+      started_stopping = 0;
+      return 1;
+    }
+    else
+    {
+      return 0;
+    }
   }
   
   started_stopping = 0;
@@ -302,6 +351,24 @@ uint8_t spinToFaceOrigin() {
     setMotors(-speed, speed);
     
   return 0;
+}
+
+uint8_t turnWatching() {
+  uint16_t elapsed_time = millis() - state_start_millis;
+
+  watchForLine();
+  
+  if(elapsed_time < 200)
+  {
+    setMotors(SPIN_SPEED,-SPIN_SPEED);
+    return 0;
+  }
+  else if(elapsed_time < 600)
+  {
+    setMotors(-SPIN_SPEED,SPIN_SPEED);
+    return 0;
+  }
+  else return spinToAngleZero();
 }
 
 // direct-to the origin
@@ -321,14 +388,60 @@ void forward_unit() {
   x -= MAZE_UNIT_DISTANCE;
 }
 
-void turn_left() {
-  uint16_t tmp_s = -c;
-  c = s;
-  s = tmp_s;
+void turn(uint8_t dir) {
+  int16_t tmp_s;
+  int32_t tmp_y;
   
-  uint32_t tmp_y = -x;
-  x = y;
-  y = tmp_y;
+  switch(dir) {
+  case LEFT:
+    tmp_s = -c;
+    c = s;
+    s = tmp_s;  
+    tmp_y = -x;
+    x = y;
+    y = tmp_y;
+    break;
+  case RIGHT:
+    tmp_s = c;
+    c = -s;
+    s = tmp_s;  
+    tmp_y = x;
+    x = -y;
+    y = tmp_y;
+    break;
+  case BACKWARD:
+    c = -c;
+    s = -s;
+    x = -x;
+    y = -y;
+    break;
+  case FORWARD:
+    break;
+  }
+}
+
+void turnLeftmost() {
+  watchForLine();
+  
+  if(saw_line_left)
+  {
+    turn(LEFT);
+    return;
+  }
+  
+  if(saw_line_forward)
+  {
+    return;
+  }
+  
+  if(saw_line_right)
+  {
+    turn(RIGHT);
+    return;
+  }
+  
+  turn(BACKWARD);
+  return;
 }
 
 uint16_t last_millis = 0;
@@ -400,6 +513,15 @@ void debug() {
 
 void loop() {
   static uint16_t battery_voltage_low_millis = 0;
+  static uint8_t last_state = 255;
+  
+  if(last_state != state)
+  {
+    // in a new state!
+    state_start_millis = millis();
+    last_state = state;
+  }
+  
   encoderUpdate();
   switch(state) {
   case 0:
@@ -412,6 +534,7 @@ void loop() {
   case 1:
     digitalWrite(13, 0);
     forward_unit();
+    resetSawLine();
     state++;
     break;
   case 2:
@@ -419,17 +542,21 @@ void loop() {
       state ++;
     break;
   case 3:
-    turn_left();
+    if(turnWatching())
+      state ++;
+    break;
+  case 4:
+    turnLeftmost();
     state ++;
     break; 
-  case 4:
-    if(spinToFaceOrigin())
+  case 5:
+    if(spinToAngleZero())
     {
       fixPosition();
       state = 1;
     }
     break;
-  case 5:
+  case 6:
     digitalWrite(13, 1);
     debug();
     break;
