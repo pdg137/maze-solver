@@ -26,9 +26,16 @@ uint8_t started_following = 0;
 #define RIGHT 3
 #define DIR_MAX 3
 
+#define BUTTON_PIN 7
+#define LED_PIN 13
+
+#define DARK_VALUE 900
+
 //uint8_t path[MAX_PATH] = { FORWARD, FORWARD, FORWARD, FORWARD, RIGHT };
 
-uint8_t path[MAX_PATH] = {
+uint8_t path[MAX_PATH];
+
+/*= {
   LEFT, LEFT, RIGHT, FORWARD, FORWARD,
   FORWARD, FORWARD, RIGHT, FORWARD, RIGHT,
   FORWARD, RIGHT, LEFT, FORWARD, LEFT,
@@ -36,9 +43,9 @@ uint8_t path[MAX_PATH] = {
   FORWARD, FORWARD, FORWARD, LEFT, FORWARD,
   FORWARD, LEFT, FORWARD, FORWARD, LEFT,
   LEFT, FORWARD, RIGHT, RIGHT
-};
+};*/
 
-uint8_t path_size = 34;
+uint8_t path_size = 0; //34;
 uint8_t path_pos = 0;
 uint8_t steps_since_last_calibrated = 99;
   
@@ -110,6 +117,7 @@ void setup() {
   pinMode(10, OUTPUT);
   pinMode(4, OUTPUT);
   pinMode(5, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
   
   sei();
   
@@ -190,6 +198,9 @@ void positionUpdate() {
 
 int16_t last_pos[DIR_MAX+1];
 
+#define FRONT_LEFT_SENSOR_CHANNEL 1
+#define FRONT_RIGHT_SENSOR_CHANNEL 0
+
 void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
 {
   int16_t s0 = 0; // left sensor
@@ -198,8 +209,8 @@ void readLine(uint8_t dir, int16_t *pos, uint8_t *on_line)
   switch(dir)
   {
   case FORWARD:
-    s0 = analogRead(1);
-    s1 = analogRead(0);
+    s0 = analogRead(FRONT_LEFT_SENSOR_CHANNEL);
+    s1 = analogRead(FRONT_RIGHT_SENSOR_CHANNEL);
     break;
   case LEFT:
     s0 = analogRead(5);
@@ -315,6 +326,34 @@ void resetStartedFollowing()
   digitalWrite(13, 0);
 }
 
+uint8_t checkForEnd() {
+  // watch for the end in the last four inches
+  static int32_t dark_start_x = 0;
+  static uint8_t on_dark = 0;
+  
+  if(x > -MAZE_UNIT_DISTANCE*4/6 &&
+     analogRead(FRONT_LEFT_SENSOR_CHANNEL) > DARK_VALUE &&
+     analogRead(FRONT_RIGHT_SENSOR_CHANNEL) > DARK_VALUE)
+  {
+    // we are on a very dark region - either the end or crossing a line
+    if(!on_dark)
+    {
+      on_dark = true;
+      dark_start_x = x;
+    }
+    if(x - dark_start_x > MAZE_UNIT_DISTANCE*2/6)
+    {
+      return 1; // 2 inches dark - must be the end!
+    }
+  }
+  else
+  {
+    on_dark = false;
+  }
+  
+  return 0;
+}
+
 uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
   int16_t speed = SPEED;
   int32_t err;
@@ -337,6 +376,7 @@ uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
       (x > -MAZE_UNIT_DISTANCE*14/6 && x < -MAZE_UNIT_DISTANCE*10/6) ) // if it is looking ahead to the next segment
     {
       followLine();
+      started_stopping = 0;
       return 0;
     }
     else if(started_following && ((uint16_t)millis() - started_following_time > 200))
@@ -488,9 +528,14 @@ void turn(uint8_t dir) {
   }
 }
 
+void simplifyPath() {
+  // TODO
+}
+
 void addToPath(uint8_t dir) {
   path[path_size] = dir;
   path_size += 1;
+  simplifyPath();
 }
 
 void turnLeftmost() {
@@ -610,10 +655,19 @@ void loop() {
   encoderUpdate();
   switch(state) {
   case 0:
-    if(getBatteryVoltage_mv() < 3000)
-      battery_voltage_low_millis = millis();
-    if(millis() - battery_voltage_low_millis > 1000)
-      state = 6;
+    setMotors(0,0);
+    if(!digitalRead(BUTTON_PIN))
+    {
+      if(path_size)
+      {
+        state = 6;
+        path_pos = 0;
+      }
+      else
+      {
+         state ++;
+      }
+    }
     debug();
     break;
   case 1:
@@ -623,7 +677,9 @@ void loop() {
     state++;
     break;
   case 2:
-    if(goHome(1, 1))   
+    if(checkForEnd())
+      state = 0;
+    else if(goHome(1, 1))   
       state ++;
     break;
   case 3:
@@ -636,6 +692,7 @@ void loop() {
     break;
   case 5:
     digitalWrite(13, 1);
+    setMotors(0,0);
     debug();
     break;
   case 6:
@@ -645,6 +702,11 @@ void loop() {
     
     // if the next two turns are FORWARD, try calibration, since it will not slow us down
     if(path_pos+1 < path_size && path[path_pos] == FORWARD && path[path_pos+1] == FORWARD)
+      steps_since_last_calibrated = 50;
+
+    // if we have a BACKWARD approaching (which shouldn't happen), also calibrate
+    if(path_pos+1 < path_size && path[path_pos+1] == BACKWARD ||
+      path_pos < path_size && path[path_pos] == BACKWARD)
       steps_since_last_calibrated = 50;
     
     state = (steps_since_last_calibrated < 20 ? 7 : 9);
