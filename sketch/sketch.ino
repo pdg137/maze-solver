@@ -23,10 +23,10 @@ uint32_t error2 = 0;
 #define RIGHT 3
 #define DIR_MAX 3
 
-uint8_t path[MAX_PATH] = {FORWARD, FORWARD, FORWARD, LEFT, FORWARD, LEFT, RIGHT};
-uint8_t path_size = 7;
+uint8_t path[MAX_PATH] = {FORWARD, FORWARD, FORWARD, LEFT, FORWARD, LEFT, FORWARD, FORWARD, RIGHT};
+uint8_t path_size = 9;
 uint8_t path_pos = 0;
-uint8_t steps_since_last_calibrated = 0;
+uint8_t steps_since_last_calibrated = 99;
   
 #define SPEED 120
 #define STOPPING_TIME_MS 100
@@ -292,10 +292,11 @@ uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
   if(x > -MAZE_UNIT_DISTANCE/6)
     watchForLine();
   
-  // follow the line for the first two inches
-  if(allow_following)
+  // consider following if it is allowed and we are close to the line
+  if(allow_following && x > -MAZE_UNIT_DISTANCE*7/6 && y > -MAZE_UNIT_DISTANCE/6 && y < MAZE_UNIT_DISTANCE/6 && s > -ANGLE_SCALE/2 && s < ANGLE_SCALE/2)
   {
-    if(x > -MAZE_UNIT_DISTANCE*5/6 && x < -MAZE_UNIT_DISTANCE*2/6)
+    // follow the line for the first two inches
+    if(x < -MAZE_UNIT_DISTANCE*4/6)
     {
       followLine();
       done_following_line = 0;
@@ -599,7 +600,7 @@ void loop() {
     state = (steps_since_last_calibrated < 2 ? 7 : 9);
     break;
   case 7: // follow path without calibrating
-    if(goHome(0, 0) || x > -MAZE_UNIT_DISTANCE)
+    if(goHome(0, 0) || x > -MAZE_UNIT_DISTANCE*5/6)
       state ++;
     break;
   case 8:
