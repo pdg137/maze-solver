@@ -34,15 +34,16 @@ uint8_t started_following = 0;
 //uint8_t path[MAX_PATH] = { FORWARD, FORWARD, FORWARD, FORWARD, RIGHT };
 
 uint8_t path[MAX_PATH] = {
-FORWARD, FORWARD, FORWARD, FORWARD, FORWARD,
-LEFT, LEFT, RIGHT, RIGHT, LEFT,
+LEFT, LEFT, RIGHT, FORWARD, FORWARD,
+FORWARD, FORWARD, RIGHT, LEFT, FORWARD,
+FORWARD, FORWARD, LEFT, RIGHT, RIGHT,
+LEFT, FORWARD, LEFT, RIGHT, LEFT,
 LEFT, FORWARD, RIGHT, LEFT, FORWARD,
-RIGHT, LEFT, RIGHT, LEFT, LEFT,
-FORWARD, FORWARD };
+RIGHT, LEFT, RIGHT, RIGHT};
 
-uint8_t path_size = 22;
+uint8_t path_size = 0;
 uint8_t path_pos = 0;
-uint8_t steps_since_last_calibrated = 99;
+uint8_t steps_since_last_calibrated ;
 uint8_t calibrated_x, calibrated_y;
 
 #define SPEED 120
@@ -402,8 +403,18 @@ uint8_t goHome(uint8_t allow_following, uint8_t stop_at_end) {
   
   if(x > -STOPPING_DISTANCE && stop_at_end)
   {
+    
     // work on stopping
-    setMotors(0,0);
+    int16_t left_pos = 0, right_pos = 0;
+    uint8_t left_on_line = 0, right_on_line = 0;
+    readLine(LEFT, &left_pos, &left_on_line);
+    readLine(RIGHT, &right_pos, &right_on_line);
+    
+    uint8_t speed = 0;
+    if(left_on_line && left_pos > 0 || right_on_line && right_pos < 0)
+      speed = SPEED/2;
+    
+    setMotors(speed,speed);
     if(!started_stopping)
     {
       started_stopping = 1;
@@ -688,6 +699,16 @@ uint8_t okToLookAhead() {
     x > -MAZE_UNIT_DISTANCE && y > -MAZE_UNIT_DISTANCE/6 && y < MAZE_UNIT_DISTANCE/6;
 }
 
+void resetVariables() {
+  steps_since_last_calibrated = 0;
+  calibrated_x = 0;
+  calibrated_y = 0;
+  c=ANGLE_SCALE;
+  s=0;
+  x=0;
+  y=0;    
+}
+
 void loop() {
   static uint16_t battery_voltage_low_millis = 0;
   static uint8_t last_state = 255;
@@ -704,13 +725,11 @@ void loop() {
   encoderUpdate();
   switch(state) {
   case 0:
-    steps_since_last_calibrated = 99;
-    calibrated_x = 0;
-    calibrated_y = 0;
     
     setMotors(0,0);
     if(!digitalRead(BUTTON_PIN))
     {
+      resetVariables();
       delay(1000);
       if(path_size)
       {
@@ -776,7 +795,6 @@ void loop() {
     }
     else
     {
-      steps_since_last_calibrated = 99;
       state = 9;
     }
     break;
